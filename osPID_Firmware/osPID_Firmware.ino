@@ -7,6 +7,7 @@
 #include "EEPROMAnything.h"
 #include "PID_AutoTune_v0_local.h"
 #include "io.h"
+#include "elapsedMillis.h"
 
 // ***** PIN ASSIGNMENTS *****
 
@@ -52,7 +53,10 @@ byte curMenu=0, mIndex=0, mDrawIndex=0;
 
 AnalogButton button(A3, 10, 200, 450, 700);
 
-unsigned long now, myLCDTime, buttonTime,ioTime, serialTime;
+elapsedMillis buttonTest, ioTest, myLCDTest, serialTest;
+unsigned long buttonInterval, ioInterval, myLCDInterval, serialInterval;
+
+unsigned long now;
 boolean sendInfo=true, sendDash=false, sendTune=false, sendInputConfig=true, sendOutputConfig=true;
 
 bool editing=false;
@@ -121,11 +125,11 @@ void DoModel()
 
 void setup()
 {
-    myLCDTime=10;
-    buttonTime=1;
-    ioTime=5;
-    serialTime=6;
-    
+    buttonInterval = 50;
+    ioInterval = 250;
+    myLCDInterval = 200;
+    serialInterval = 500;
+
     pinMode(TxPin, OUTPUT);
 
     Serial.begin(9600);
@@ -149,8 +153,9 @@ void setup()
     delay(2000);                     // Wait 2 seconds
 
     initializeEEPROM();
+    
     // set output window to 10 seconds
-    setOutputWindow(10);
+    setOutputWindow(1);
 
 #ifdef USE_SIMULATION
     input = inputStart;
@@ -159,7 +164,8 @@ void setup()
     InitializeInputCard();
     InitializeOutputCard();
 #endif
-    myPID.SetSampleTime(1000);
+
+    myPID.SetSampleTime(100);
     myPID.SetOutputLimits(0, 100);
     myPID.SetTunings(kp, ki, kd);
     myPID.SetControllerDirection(ctrlDirection);
@@ -169,53 +175,14 @@ void setup()
 byte editDepth=0;
 void loop()
 {
+    bool doIO = false;
     now = millis();
-
-    if(now >= buttonTime)
-    {
-        switch(button.get())
-        {
-        case BUTTON_NONE:
-            break;
-
-        case BUTTON_RETURN:
-            Serial.println("BUTTON_RETURN");
-            back();
-            break;
-
-        case BUTTON_UP:      
-            Serial.println("BUTTON_UP");
-            updown(true);
-            break;
-
-        case BUTTON_DOWN:
-            Serial.println("BUTTON_DOWN");
-            updown(false);
-            break;
-
-        case BUTTON_OK:
-            Serial.println("BUTTON_OK");
-            ok();
-            break;
-        }
-        buttonTime += 50;
-    }
-
-    bool doIO = now >= ioTime;
     
-    //read in the input
-    if(doIO)
-    { 
-        ioTime+=250;
-#ifdef USE_SIMULATION
-        DoModel();
-        pidInput = input;
-#else
-        input =  ReadInputFromCard();
-        if(!isnan(input))pidInput = input;
-#endif /*USE_SIMULATION*/
-    }
+    doButtonRead();
 
+    bool doWrite = doInputRead();
+    
+    // compute pid when not tuning
     if(tuning)
     {
         byte val = (aTune.Runtime());
@@ -244,31 +211,97 @@ void loop()
     }
 
     //send the output
-    if(doIO)
+    if(doWrite)
+    {
+        doOutputWrite(output);
+    }
+
+    doScreenUpdate();
+    
+    doSerialIO();
+    
+}
+
+void doButtonRead()
+{
+    if(buttonTest >= buttonInterval)
+    {
+        switch(button.get())
+        {
+        case BUTTON_NONE:
+            break;
+
+        case BUTTON_RETURN:
+            Serial.println("BUTTON_RETURN");
+            back();
+            break;
+
+        case BUTTON_UP:      
+            Serial.println("BUTTON_UP");
+            updown(true);
+            break;
+
+        case BUTTON_DOWN:
+            Serial.println("BUTTON_DOWN");
+            updown(false);
+            break;
+
+        case BUTTON_OK:
+            Serial.println("BUTTON_OK");
+            ok();
+            break;
+        }
+        
+        buttonTest = buttonTest - buttonInterval;
+    }
+}
+
+bool doInputRead()
+{
+    bool didRead = false;
+    if(ioTest >= ioInterval)
     {
 #ifdef USE_SIMULATION
-        theta[29] = output;
+        DoModel();
+        pidInput = input;
 #else
-        //send to output card
-        WriteToOutputCard(output);
-#endif /*USE_SIMULATION*/  
-
+        input =  ReadInputFromCard();
+        if(!isnan(input))pidInput = input;
+#endif /*USE_SIMULATION*/
+        ioTest = ioTest - ioInterval;
+        didRead = true;
     }
+    return didRead;
+}
 
-    if(now>myLCDTime)
+void doOutputWrite(double output)
+{
+#ifdef USE_SIMULATION
+    theta[29] = output;
+#else
+    //send to output card
+    WriteToOutputCard(output);
+#endif /*USE_SIMULATION*/  
+}
+
+void doScreenUpdate()
+{
+    if(myLCDTest >= myLCDInterval)
     {
         drawmyLCD();
-        myLCDTime+=250; 
+        myLCDTest = myLCDTest - myLCDInterval;
     }
-    
-    if(millis() > serialTime)
+}
+
+void doSerialIO()
+{
+    if(serialTest >= serialInterval)
     {
         //if(receivingProfile && (now-profReceiveStart)>profReceiveTimeout) receivingProfile = false;
         SerialReceive();
         SerialSend();
-        serialTime += 500;
+        serialTest = serialTest - serialInterval;
     }
-    
 }
 
 void drawmyLCD()
@@ -584,12 +617,12 @@ double getValMax(byte index)
     case 5: 
     case 6: 
         //case 11: 
-        return 999.9;
+        return 1500.0;
     case 8: 
     case 9: 
     case 10: 
     default:
-        return 99.99;
+        return 100.00;
     } 
 
 }

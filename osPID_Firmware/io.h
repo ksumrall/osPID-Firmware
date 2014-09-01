@@ -343,12 +343,12 @@ byte outputType = 1;
 const byte RelayPin = 5;
 const byte SSRPin = 6;
 //unsigned long windowStartTime;
-double outWindowSec = 5.0;
-unsigned long WindowSize = 5000;
+double outWindowSec = 1.0;
+unsigned long WindowSize = 1000;
 
 void setOutputWindow(double val)
 {
-    unsigned long temp = (unsigned long)(val*1000);
+    double temp = (unsigned long)(val*1000);
     if(temp<500)temp = 500;
     outWindowSec = (double)temp/1000;
     if(temp!=WindowSize)
